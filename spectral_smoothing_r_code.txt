@@ -1,0 +1,9 @@
+library(ggplot2)
+library(prospectr)
+
+setwd('C:/Users/...')
+orig <- read.csv('YOUR_FILE.csv',header=TRUE)
+smoothed <- orig
+smoothed[,9:204] <-  movav(orig[,8:205], w=3)
+smoothed[,c(8,205)] <- NULL
+write.csv(smoothed, "smoothed.csv")
