@@ -1,0 +1,40 @@
+//Aligning VNIR and SWIR data in a Hyperion image, because the two datasets are collected with different spectrometers which are not exactly aligned
+
+//original Hyperion image, in Illinois, US
+var image= ee.Image('EO1/HYPERION/EO1H0230322012194110P0_SGS_01'); 
+
+//separating VNIR from SWIR
+var image_vnir = ee.Image('EO1/HYPERION/EO1H0230322012194110P0_SGS_01')
+  .select(ee.List.sequence(0,49));
+  
+var image_swir = ee.Image('EO1/HYPERION/EO1H0230322012194110P0_SGS_01')
+  .select(ee.List.sequence(50,197));
+
+//co-aligning SWIR with VNIR
+var im_vnir_orig = image_vnir;
+var im_swir_orig = image_swir;
+
+var im_vnir_56_57 = im_vnir_orig.select(48,49);
+var im_swir_77_78 = im_swir_orig.select(0,1);
+
+var displacement = im_swir_77_78.displacement({
+  referenceImage: im_vnir_56_57,
+  maxOffset: 70,
+  patchWidth: 100
+});
+
+var offset= displacement.select('dx').hypot(displacement.select('dy'));
+var angle= displacement.select('dx').atan2(displacement.select('dy'));
+
+//Map.addLayer(offset, {min:0, max: 20}, 'offset');
+//Map.addLayer(angle, {min: -Math.PI, max: Math.PI}, 'angle');
+
+var registered = im_vnir_orig.addBands(im_swir_orig.displace(displacement));
+
+var regswir = registered
+  .select(ee.List.sequence(50,197));
+// Map.addLayer(regswir, {min: 1700, max: 4900},'regswir');
+
+//Displaying original image and registered image (not much difference, some seen on edges)
+Map.addLayer(image_swir.select(0), {min: 100, max: 50000, palette: ['blue']},'origswir');
+Map.addLayer(regswir.select(0), {min: 1700, max: 4900, palette: ['orange']},'regswir');

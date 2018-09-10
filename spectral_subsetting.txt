@@ -1,0 +1,15 @@
+//Spectral subsetting
+
+//define image in Texas, US
+var image = ee.Image('EO1/HYPERION/EO1H0290382013173110K2_SG1_01');
+
+//subset by selecting desired bands, an example here with multiple ranges
+var subset_image = ee.Image('EO1/HYPERION/EO1H0290382013173110K2_SG1_01').select(ee.List.sequence(2,32))
+.addBands(ee.Image('EO1/HYPERION/EO1H0290382013173110K2_SG1_01').select(ee.List.sequence(34,51)))
+.addBands(ee.Image('EO1/HYPERION/EO1H0290382013173110K2_SG1_01').select(ee.List.sequence(55,70)))
+.addBands(ee.Image('EO1/HYPERION/EO1H0290382013173110K2_SG1_01').select(ee.List.sequence(74,92)))
+.addBands(ee.Image('EO1/HYPERION/EO1H0290382013173110K2_SG1_01').select(ee.List.sequence(107,137)))
+.addBands(ee.Image('EO1/HYPERION/EO1H0290382013173110K2_SG1_01').select(ee.List.sequence(161,168)));
+
+//displaying results
+Map.addLayer(subset_image, {min:1, max:5000});

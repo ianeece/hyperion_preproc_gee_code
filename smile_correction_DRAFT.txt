@@ -1,0 +1,274 @@
+//Smile correction scrip
+
+//**************This is a work in progress, and is not ready to implement; code is provided for PCAs and Inverse PCAs, but we still need to measure noise for MNF*************
+
+//***************defining image (in Illinois, USA) and separating VNIR and SWIR**************************************
+var image = ee.Image('EO1/HYPERION/EO1H0230322012194110P0_SGS_01');
+var vnir=image.select(ee.List.sequence(0,47)).divide(40).float();
+var swir=image.select(ee.List.sequence(48,124)).divide(80).float();
+var region = image.geometry();
+//Map.addLayer(image);
+
+//*********FIRST PCA****************************************
+
+var vnir_region = vnir.geometry();
+// Map.centerObject(vnir_region, 10);
+// Map.addLayer(ee.Image().paint(vnir_region, 0, 2), {}, 'VNIR Region');
+// Map.addLayer(vnir, {bands: ['B010', 'B009', 'B008'], min: 0, max: 5000}, 'Original VNIR Image');
+
+var vnir_scale = vnir.projection().nominalScale();
+
+var vnir_bandNames = vnir.bandNames();
+
+var vnir_meanDict = vnir.reduceRegion({
+    reducer: ee.Reducer.mean(),
+    geometry: vnir_region,
+    scale: vnir_scale,
+    maxPixels: 1e18
+});
+var vnir_means = ee.Image.constant(vnir_meanDict.values(vnir_bandNames));
+
+var vnir_centered = vnir.subtract(vnir_means);
+
+var vnir_getNewBandNames = function(vnir_prefix) {
+  var vnir_seq = ee.List.sequence(1, vnir_bandNames.length());
+  return vnir_seq.map(function(b) {
+    return ee.String(vnir_prefix).cat(ee.Number(b).int());
+  });
+};
+
+var vnir_arrays = vnir_centered.toArray();
+
+var vnir_covar = vnir_arrays.reduceRegion({
+    reducer: ee.Reducer.centeredCovariance(),
+    geometry: vnir_region,
+    scale: vnir_scale,
+    maxPixels: 1e18
+  });
+var vnir_covarArray = ee.Array(vnir_covar.get('array'));
+
+var vnir_eigens = vnir_covarArray.eigen();
+
+var vnir_eigenValues = vnir_eigens.slice(1, 0, 1);
+
+var vnir_eigenVectors = vnir_eigens.slice(1, 1);
+
+var vnir_arrayImage = vnir_arrays.toArray(1);
+
+var vnir_principalComponents = ee.Image(vnir_eigenVectors).matrixMultiply(vnir_arrayImage);
+
+var vnir_sdImage = ee.Image(vnir_eigenValues.sqrt())
+    .arrayProject([0]).arrayFlatten([vnir_getNewBandNames('vnir_sd')]);
+
+var vnir_pcImage= vnir_principalComponents
+    .arrayProject([0])
+    .arrayFlatten([vnir_getNewBandNames('vnir_pc')])
+    .divide(vnir_sdImage);
+
+//**************2ND PCA***********************************************
+var vnir_image2 = vnir_pcImage;
+var vnir_region2 = vnir_image2.geometry();
+// Map.centerObject(vnir_region2, 10);
+// Map.addLayer(ee.Image().paint(vnir_region2, 0, 2), {}, 'vnir_Region2');
+// Map.addLayer(vnir_image2, {bands: ['vnir_pc3', 'vnir_pc2', 'vnir_pc1'], min: 0, max: 10}, 'VNIR PC Image');
+
+var vnir_scale2 = vnir_image2.projection().nominalScale();
+
+var vnir_bandNames2 = vnir_image2.bandNames();
+
+
+var vnir_meanDict2 = vnir_image2.reduceRegion({
+    reducer: ee.Reducer.mean(),
+    geometry: vnir_region2,
+    scale: vnir_scale2,
+    maxPixels: 1e18
+});
+var vnir_means2 = ee.Image.constant(vnir_meanDict2.values(vnir_bandNames2));
+
+var vnir_centered2 = vnir_image2.subtract(vnir_means2);
+
+var vnir_getNewBandNames2 = function(vnir_prefix) {
+  var vnir_seq2 = ee.List.sequence(1, vnir_bandNames2.length());
+  return vnir_seq2.map(function(b) {
+    return ee.String(vnir_prefix).cat(ee.Number(b).int());
+  });
+};
+
+var vnir_arrays2 = vnir_centered2.toArray();
+var vnir_covar2 = vnir_arrays2.reduceRegion({
+    reducer: ee.Reducer.centeredCovariance(),
+    geometry: vnir_region2,
+    scale: vnir_scale2,
+    maxPixels: 1e18
+  });
+var vnir_covarArray2 = ee.Array(vnir_covar2.get('array'));
+var vnir_eigens2 = vnir_covarArray2.eigen();
+var vnir_eigenValues2 = vnir_eigens2.slice(1, 0, 1);
+var vnir_eigenVectors2 = vnir_eigens2.slice(1, 1);
+var vnir_arrayImage2 = vnir_arrays2.toArray(1);
+var vnir_principalComponents2 = ee.Image(vnir_eigenVectors2).matrixMultiply(vnir_arrayImage2);
+var vnir_sdImage2 = ee.Image(vnir_eigenValues2.sqrt())
+    .arrayProject([0]).arrayFlatten([vnir_getNewBandNames2('vnir_sd')]);
+    
+var vnir_pcImage2= vnir_principalComponents2
+    .arrayProject([0])
+    .arrayFlatten([vnir_getNewBandNames2('vnir_pc')])
+    .divide(vnir_sdImage2);
+  
+//********INVERSE PCAs WITHOUT REMOVING PC*****************
+var vnir_eiVec2Transp= ee.Image(vnir_eigenVectors2).arrayTranspose();
+var vnir_pcrecon= vnir_eiVec2Transp.matrixMultiply(vnir_principalComponents2.toArray()).arrayProject([0]).add(vnir_means2.toArray());
+    // .arrayProject([0])
+ //    .arrayFlatten([vnir_getNewBandNames2('vnir_pc')]);
+
+var vnir_eiVecTransp= ee.Image(vnir_eigenVectors).arrayTranspose();
+var vnir_origrecon = vnir_eiVecTransp.matrixMultiply(vnir_pcrecon.toArray(1))
+    .arrayProject([0])
+    .arrayFlatten([vnir_getNewBandNames2('')]).add(vnir_means);
+
+//********INVERSE PCAs AFTER REMOVING NOISE PC*****************
+var vnir_eiVec2Transpfiltered= vnir_eiVec2Transp.arraySlice(1, 1, 50);
+var vnir_principalComponents2filtered= vnir_principalComponents2.arraySlice(0, 1, 50);
+
+var vnir_pcreconfiltered= vnir_eiVec2Transpfiltered.matrixMultiply(vnir_principalComponents2filtered).arrayProject([0]).add(vnir_means2.toArray());
+//Map.addLayer(vnir_pcreconfiltered.select([0]));
+
+
+var vnir_eiVecTranspfiltered= vnir_eiVecTransp.arraySlice(1,1,50);
+var vnir_principalComponentsfiltered= vnir_principalComponents.arraySlice(0, 1, 50);
+var vnir_origreconfiltered= vnir_eiVecTranspfiltered.matrixMultiply(vnir_principalComponentsfiltered).arrayProject([0]).add(vnir_means.toArray())
+    .arrayProject([0])
+    .arrayFlatten([vnir.bandNames()]);
+
+//**********************SWIR SMILE CORRECTION********************
+//*********FIRST PCA****************************************
+
+var swir_region = swir.geometry();
+// Map.centerObject(swir_region, 10);
+// Map.addLayer(ee.Image().paint(swir_region, 0, 2), {}, 'swir Region');
+// Map.addLayer(swir, {bands: ['B081', 'B078', 'B077'], min: 0, max: 5000}, 'Original registered swir Image');
+
+var swir_scale = swir.projection().nominalScale();
+
+var swir_bandNames = swir.bandNames();
+
+var swir_meanDict = swir.reduceRegion({
+    reducer: ee.Reducer.mean(),
+    geometry: swir_region,
+    scale: swir_scale,
+    maxPixels: 1e18
+});
+var swir_means = ee.Image.constant(swir_meanDict.values(swir_bandNames));
+
+var swir_centered = swir.subtract(swir_means);
+
+var swir_getNewBandNames = function(swir_prefix) {
+  var swir_seq = ee.List.sequence(1, swir_bandNames.length());
+  return swir_seq.map(function(b) {
+    return ee.String(swir_prefix).cat(ee.Number(b).int());
+  });
+};
+
+var swir_arrays = swir_centered.toArray();
+
+var swir_covar = swir_arrays.reduceRegion({
+    reducer: ee.Reducer.centeredCovariance(),
+    geometry: swir_region,
+    scale: swir_scale,
+    maxPixels: 1e18
+  });
+var swir_covarArray = ee.Array(swir_covar.get('array'));
+
+var swir_eigens = swir_covarArray.eigen();
+
+var swir_eigenValues = swir_eigens.slice(1, 0, 1);
+
+var swir_eigenVectors = swir_eigens.slice(1, 1);
+
+var swir_arrayImage = swir_arrays.toArray(1);
+
+var swir_principalComponents = ee.Image(swir_eigenVectors).matrixMultiply(swir_arrayImage);
+
+var swir_sdImage = ee.Image(swir_eigenValues.sqrt())
+    .arrayProject([0]).arrayFlatten([swir_getNewBandNames('swir_sd')]);
+
+var swir_pcImage= swir_principalComponents
+    .arrayProject([0])
+    .arrayFlatten([swir_getNewBandNames('swir_pc')])
+    .divide(swir_sdImage);
+
+//**************2ND PCA***********************************************
+var swir_image2 = swir_pcImage;
+var swir_region2 = swir_image2.geometry();
+// Map.centerObject(swir_region2, 10);
+// Map.addLayer(ee.Image().paint(swir_region2, 0, 2), {}, 'swir_Region2');
+// Map.addLayer(swir_image2, {bands: ['pc3', 'pc2', 'pc1'], min: 0, max: 10}, 'swir PC Image');
+
+var swir_scale2 = swir_image2.projection().nominalScale();
+
+var swir_bandNames2 = swir_image2.bandNames();
+
+
+var swir_meanDict2 = swir_image2.reduceRegion({
+    reducer: ee.Reducer.mean(),
+    geometry: swir_region2,
+    scale: swir_scale2,
+    maxPixels: 1e18
+});
+var swir_means2 = ee.Image.constant(swir_meanDict2.values(swir_bandNames2));
+
+var swir_centered2 = swir_image2.subtract(swir_means2);
+
+var swir_getNewBandNames2 = function(swir_prefix) {
+  var swir_seq2 = ee.List.sequence(1, swir_bandNames2.length());
+  return swir_seq2.map(function(b) {
+    return ee.String(swir_prefix).cat(ee.Number(b).int());
+  });
+};
+
+var swir_arrays2 = swir_centered2.toArray();
+var swir_covar2 = swir_arrays2.reduceRegion({
+    reducer: ee.Reducer.centeredCovariance(),
+    geometry: swir_region2,
+    scale: swir_scale2,
+    maxPixels: 1e18
+  });
+var swir_covarArray2 = ee.Array(swir_covar2.get('swir array'));
+var swir_eigens2 = swir_covarArray2.eigen();
+var swir_eigenValues2 = swir_eigens2.slice(1, 0, 1);
+var swir_eigenVectors2 = swir_eigens2.slice(1, 1);
+var swir_arrayImage2 = swir_arrays2.toArray(1);
+var swir_principalComponents2 = ee.Image(swir_eigenVectors2).matrixMultiply(swir_arrayImage2);
+var swir_sdImage2 = ee.Image(swir_eigenValues2.sqrt())
+    .arrayProject([0]).arrayFlatten([swir_getNewBandNames2('swir_sd')]);
+    
+var swir_pcImage2= swir_principalComponents2
+    .arrayProject([0])
+    .arrayFlatten([swir_getNewBandNames2('swir_pc')])
+    .divide(swir_sdImage2);
+
+//********INVERSE PCAs WITHOUT REMOVING PC*****************
+var swir_eiVec2Transp= ee.Image(swir_eigenVectors2).arrayTranspose();
+var swir_pcrecon= swir_eiVec2Transp.matrixMultiply(swir_principalComponents2.toArray()).arrayProject([0]).add(swir_means2.toArray());
+ 
+var swir_eiVecTransp= ee.Image(swir_eigenVectors).arrayTranspose();
+var swir_origrecon = swir_eiVecTransp.matrixMultiply(swir_pcrecon.toArray(1))
+    .arrayProject([0])
+    .arrayFlatten([swir_getNewBandNames2('swir_pc')]).add(swir_means);
+
+//********INVERSE PCAs AFTER REMOVING PC*****************
+var swir_eiVec2Transpfiltered= swir_eiVec2Transp.arraySlice(1, 1, 50);
+var swir_principalComponents2filtered= swir_principalComponents2.arraySlice(0, 1, 50);
+
+var swir_pcreconfiltered= swir_eiVec2Transpfiltered.matrixMultiply(swir_principalComponents2filtered).arrayProject([0]).add(swir_means2.toArray());
+
+var swir_eiVecTranspfiltered= swir_eiVecTransp.arraySlice(1,1,50);
+var swir_principalComponentsfiltered= swir_principalComponents.arraySlice(0, 1, 50);
+var swir_origreconfiltered= swir_eiVecTranspfiltered.matrixMultiply(swir_principalComponentsfiltered).arrayProject([0]).add(swir_means.toArray())
+    .arrayProject([0])
+    .arrayFlatten([swir.bandNames()]);
+
+var regall=vnir_origreconfiltered.addBands(swir_origreconfiltered);
+
+//Displaying results
+Map.addLayer(regall, {min:0, max:150})
